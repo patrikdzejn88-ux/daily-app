@@ -98,11 +98,21 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Task> get _dueTasks =>
       _tasks.where((t) => t.isDueOn(_now)).toList();
 
+  /// Квесты, назначенные на другие даты (не сегодня), кроме ежедневных.
+  List<Task> get _scheduledTasks {
+    final list = _tasks
+        .where((t) => !t.daily && t.date != null && !t.isDueOn(_now))
+        .toList();
+    list.sort((a, b) => a.date!.compareTo(b.date!));
+    return list;
+  }
+
   @override
   Widget build(BuildContext context) {
     final due = _dueTasks;
     final active = due.where((t) => !t.done);
     final done = due.where((t) => t.done);
+    final scheduled = _scheduledTasks;
     final totalExp = HunterProgress.expForTasks(_tasks, onlyToday: true);
 
     return Scaffold(
@@ -118,7 +128,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: SoloColors.neonBlue,
                       ),
                     )
-                  : _taskList(active: active.toList(), done: done.toList()),
+                  : _taskList(
+                      active: active.toList(),
+                      done: done.toList(),
+                      scheduled: scheduled,
+                    ),
             ),
           ],
         ),
@@ -189,7 +203,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${_now.day} ${months[_now.month]}';
   }
 
-  Widget _taskList({required List<Task> active, required List<Task> done}) {
+  Widget _taskList({
+    required List<Task> active,
+    required List<Task> done,
+    required List<Task> scheduled,
+  }) {
     if (_tasks.isEmpty) {
       return const Center(
         child: Padding(
@@ -225,6 +243,17 @@ class _HomeScreenState extends State<HomeScreen> {
           _sectionLabel('ВЫПОЛНЕНО (${done.length})', SoloColors.done),
           const SizedBox(height: 8),
           ...done.map((t) => TaskTile(
+                task: t,
+                onToggle: _toggle,
+                onDelete: () => _delete(t),
+              )),
+        ],
+        const SizedBox(height: 16),
+        if (scheduled.isNotEmpty) ...[
+          _sectionLabel('ЗАПЛАНИРОВАНО (${scheduled.length})',
+              SoloColors.neonViolet),
+          const SizedBox(height: 8),
+          ...scheduled.map((t) => TaskTile(
                 task: t,
                 onToggle: _toggle,
                 onDelete: () => _delete(t),
