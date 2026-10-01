@@ -5,13 +5,17 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       flutter: stable
-    triggers:
-      push:
-        branch_patterns:
-          - pattern: main
-            include: true
-          - pattern: master
-            include: true
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+          source: true
+        - pattern: 'master'
+          include: true
+          source: true
+      cancel_previous_builds: true
     scripts:
       - name: Get dependencies
         script: flutter pub get
