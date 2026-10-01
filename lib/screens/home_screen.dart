@@ -57,14 +57,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _toggle(Task task) async {
-    final updated = task.copyWith(done: !task.done);
+    final nowDone = task.isDoneOn(_now);
+    final updated =
+        nowDone ? task.markNotDone() : task.markDoneOn(_now);
     await _db.update(updated);
     if (!mounted) return;
     setState(() {
       final i = _tasks.indexWhere((t) => t.id == task.id);
       if (i != -1) _tasks[i] = updated;
     });
-    if (updated.done) {
+    if (!nowDone) {
       showSystemMessage(
         context,
         message: '+${updated.rank.exp} EXP — ${updated.title}',
@@ -110,10 +112,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final due = _dueTasks;
-    final active = due.where((t) => !t.done);
-    final done = due.where((t) => t.done);
+    final active = due.where((t) => !t.isDoneOn(_now));
+    final done = due.where((t) => t.isDoneOn(_now));
     final scheduled = _scheduledTasks;
-    final totalExp = HunterProgress.expForTasks(_tasks, onlyToday: true);
+    final totalExp = HunterProgress.expForTasks(_tasks);
 
     return Scaffold(
       backgroundColor: SoloColors.background,

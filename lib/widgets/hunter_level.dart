@@ -11,33 +11,42 @@ class HunterProgress {
   /// Опыт для уровня: чем выше — тем больше нужно.
   static int expForLevel(int level) => 100 + (level - 1) * 50;
 
-  static int levelForExp(int exp) {
-    int level = startLevel;
-    int remaining = exp;
-    while (remaining >= expForLevel(level)) {
-      remaining -= expForLevel(level);
-      level++;
-    }
-    return level;
-  }
-
+  /// Раскладывает накопленный EXP на уровень + остаток, поддерживая
+  /// отрицательные значения (уровень может опускаться ниже 1).
   static (int level, int current, int needed) breakdown(int totalExp) {
     int level = startLevel;
-    int remaining = totalExp;
-    while (remaining >= expForLevel(level)) {
-      remaining -= expForLevel(level);
+    int current = totalExp;
+
+    // Поднимаемся вверх, пока хватает на следующий уровень.
+    while (current >= expForLevel(level)) {
+      current -= expForLevel(level);
       level++;
     }
-    return (level, remaining, expForLevel(level));
+
+    // Уходим вниз ниже 1 при долге: каждый уровень вниз возвращает его объём.
+    while (current < 0) {
+      final prev = level - 1 < startLevel ? startLevel : level - 1;
+      current += expForLevel(prev);
+      level--;
+    }
+
+    final needed = expForLevel(level < startLevel ? startLevel : level);
+    return (level, current.clamp(0, needed), needed);
   }
 
-  /// Суммарный опыт за выполненные квесты.
-  static int expForTasks(List<Task> tasks, {required bool onlyToday}) {
+  /// Суммарный баланс EXP по квестам.
+  /// - одноразовый выполненный: +rank.exp;
+  /// - ежедневный выполненный сегодня: +rank.exp;
+  /// - ежедневный НЕ выполненный сегодня: −rank.exp (штраф).
+  static int expForTasks(List<Task> tasks) {
+    final today = DateTime.now();
     int sum = 0;
     for (final t in tasks) {
-      if (!t.done) continue;
-      if (onlyToday && !t.isDueOn(DateTime.now())) continue;
-      sum += t.rank.exp;
+      if (t.daily) {
+        sum += t.isDoneOn(today) ? t.rank.exp : -t.rank.exp;
+      } else if (t.done) {
+        sum += t.rank.exp;
+      }
     }
     return sum;
   }
@@ -52,14 +61,28 @@ class HunterLevelCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (level, current, needed) = HunterProgress.breakdown(totalExp);
-    final progress = needed <= 0 ? 0.0 : (current / needed).clamp(0.0, 1.0);
+    final negative = totalExp < 0;
+    final levelColor = negative ? SoloColors.danger : SoloColors.textPrimary;
+    final progress =
+        needed <= 0 ? 0.0 : (current / needed).clamp(0.0, 1.0).toDouble();
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: SoloColors.surface,
-        border: Border.all(color: SoloColors.borderGlow, width: 1),
+        border: Border.all(
+          color: negative ? SoloColors.danger : SoloColors.borderGlow,
+          width: 1,
+        ),
         borderRadius: BorderRadius.circular(10),
+        boxShadow: negative
+            ? [
+                BoxShadow(
+                  color: SoloColors.danger.withValues(alpha: 0.25),
+                  blurRadius: 14,
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -67,10 +90,10 @@ class HunterLevelCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'HUNTER',
+              Text(
+                negative ? 'WARNING' : 'HUNTER',
                 style: TextStyle(
-                  color: SoloColors.neonBlue,
+                  color: negative ? SoloColors.danger : SoloColors.neonBlue,
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 2,
@@ -78,8 +101,8 @@ class HunterLevelCard extends StatelessWidget {
               ),
               Text(
                 'LV. $level',
-                style: const TextStyle(
-                  color: SoloColors.textPrimary,
+                style: TextStyle(
+                  color: levelColor,
                   fontSize: 26,
                   fontWeight: FontWeight.w900,
                   fontStyle: FontStyle.italic,
@@ -90,8 +113,8 @@ class HunterLevelCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             'EXP $current / $needed',
-            style: const TextStyle(
-              color: SoloColors.textSecondary,
+            style: TextStyle(
+              color: negative ? SoloColors.danger : SoloColors.textSecondary,
               fontSize: 13,
             ),
           ),
@@ -114,10 +137,17 @@ class HunterLevelCard extends StatelessWidget {
                     alignment: Alignment.centerLeft,
                     child: Container(
                       decoration: BoxDecoration(
-                        gradient: SoloColors.levelBar,
+                        color: negative
+                            ? SoloColors.danger
+                            : null,
+                        gradient: negative
+                            ? null
+                            : SoloColors.levelBar,
                         boxShadow: [
                           BoxShadow(
-                            color: SoloColors.neonCyan
+                            color: (negative
+                                    ? SoloColors.danger
+                                    : SoloColors.neonCyan)
                                 .withValues(alpha: 0.6),
                             blurRadius: 10,
                           ),

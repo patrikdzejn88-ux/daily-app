@@ -9,7 +9,7 @@ class TaskDatabase {
   static final TaskDatabase instance = TaskDatabase._();
 
   static const _dbName = 'daily_app.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2;
 
   Database? _db;
 
@@ -29,9 +29,16 @@ class TaskDatabase {
             date TEXT,
             daily INTEGER NOT NULL DEFAULT 0,
             done INTEGER NOT NULL DEFAULT 0,
+            last_done_date TEXT,
             created_at TEXT
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+              'ALTER TABLE tasks ADD COLUMN last_done_date TEXT');
+        }
       },
     );
     return _db!;

@@ -32,6 +32,7 @@ class Task {
     this.date, // если null и daily == true — ежедневный
     this.daily = false,
     this.done = false,
+    this.lastDoneDate, // для ежедневных: день последнего выполнения
     this.createdAt,
   });
 
@@ -44,8 +45,52 @@ class Task {
 
   /// Ежедневный повторяющийся квест.
   final bool daily;
-  bool done;
+
+  /// Состояние для одноразовых квестов (и дублирование для совместимости).
+  final bool done;
+
+  /// День последнего выполнения ежедневного квеста (yyyy-MM-dd).
+  final DateTime? lastDoneDate;
   final DateTime? createdAt;
+
+  /// Ежедневный квест считается выполненным сегодня, если lastDoneDate —
+  /// это сегодня. Одноразовый — по флагу done.
+  bool isDoneOn(DateTime day) {
+    if (daily) {
+      if (lastDoneDate == null) return false;
+      return sameDay(lastDoneDate!, day);
+    }
+    return done;
+  }
+
+  static bool sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  Task markDoneOn(DateTime day) => daily
+      ? Task(
+          id: id,
+          title: title,
+          rank: rank,
+          date: date,
+          daily: daily,
+          done: true,
+          lastDoneDate: day,
+          createdAt: createdAt,
+        )
+      : copyWith(done: true);
+
+  Task markNotDone() => daily
+      ? Task(
+          id: id,
+          title: title,
+          rank: rank,
+          date: date,
+          daily: daily,
+          done: false,
+          lastDoneDate: null,
+          createdAt: createdAt,
+        )
+      : copyWith(done: false);
 
   Map<String, Object?> toMap() {
     return {
@@ -55,6 +100,7 @@ class Task {
       'date': date?.toIso8601String(),
       'daily': daily ? 1 : 0,
       'done': done ? 1 : 0,
+      'last_done_date': lastDoneDate?.toIso8601String(),
       'created_at': createdAt?.toIso8601String(),
     };
   }
@@ -71,6 +117,9 @@ class Task {
       date: m['date'] != null ? DateTime.parse(m['date'] as String) : null,
       daily: (m['daily'] as int? ?? 0) == 1,
       done: (m['done'] as int? ?? 0) == 1,
+      lastDoneDate: m['last_done_date'] != null
+          ? DateTime.parse(m['last_done_date'] as String)
+          : null,
       createdAt: m['created_at'] != null
           ? DateTime.parse(m['created_at'] as String)
           : null,
@@ -93,6 +142,7 @@ class Task {
         date: date,
         daily: daily,
         done: done ?? this.done,
+        lastDoneDate: lastDoneDate,
         createdAt: createdAt,
       );
 }

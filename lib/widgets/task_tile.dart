@@ -16,22 +16,28 @@ class TaskTile extends StatelessWidget {
   final ValueChanged<Task> onToggle;
   final VoidCallback onDelete;
 
+  static DateTime get _today {
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day);
+  }
+
   @override
   Widget build(BuildContext context) {
     final rank = task.rank;
+    final doneOn = task.isDoneOn(_today);
     final expired = !task.daily &&
         task.date != null &&
         task.date!.isBefore(_today) &&
-        !task.done;
+        !doneOn;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: task.done
+        color: doneOn
             ? SoloColors.surface.withValues(alpha: 0.5)
             : SoloColors.surface,
         border: Border.all(
-          color: task.done ? SoloColors.done : SoloColors.border,
+          color: doneOn ? SoloColors.done : SoloColors.border,
           width: 1,
         ),
         borderRadius: BorderRadius.circular(8),
@@ -77,26 +83,24 @@ class TaskTile extends StatelessWidget {
                     Text(
                       task.title,
                       style: TextStyle(
-                        color: task.done
+                        color: doneOn
                             ? SoloColors.textSecondary
                             : SoloColors.textPrimary,
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         decoration:
-                            task.done ? TextDecoration.lineThrough : null,
+                            doneOn ? TextDecoration.lineThrough : null,
                         decorationColor: SoloColors.textSecondary,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _subtitle(task),
+                      _subtitle(task, doneOn),
                       style: TextStyle(
                         color: expired
                             ? SoloColors.danger
-                            : (task.done &&
-                                    !_isToday(task) &&
-                                    task.date != null)
-                                ? SoloColors.done
+                            : (task.daily && !doneOn)
+                                ? SoloColors.danger
                                 : SoloColors.textDim,
                         fontSize: 12,
                       ),
@@ -105,7 +109,7 @@ class TaskTile extends StatelessWidget {
                 ),
               ),
               // Статус/удаление
-              if (task.done)
+              if (doneOn)
                 const Padding(
                   padding: EdgeInsets.only(right: 6),
                   child: Icon(Icons.check_circle,
@@ -132,34 +136,21 @@ class TaskTile extends StatelessWidget {
     );
   }
 
-  static DateTime get _today {
-    final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day);
-  }
-
-  static bool _isToday(Task t) {
-    final n = DateTime.now();
-    return t.date != null &&
-        t.date!.year == n.year &&
-        t.date!.month == n.month &&
-        t.date!.day == n.day;
-  }
-
-  String _subtitle(Task t) {
+  String _subtitle(Task t, bool doneOn) {
     if (t.daily) {
-      return t.done
-          ? 'Ежедневный · завершён'
-          : 'Ежедневный квест · +${t.rank.exp} EXP';
+      return doneOn
+          ? 'Ежедневный · выполнено +${t.rank.exp} EXP'
+          : 'Ежедневный · не выполнено −${t.rank.exp} EXP';
     }
     if (t.date == null) {
-      return t.done ? '+${t.rank.exp} EXP' : 'Без даты · +${t.rank.exp} EXP';
+      return doneOn ? '+${t.rank.exp} EXP' : 'Без даты · +${t.rank.exp} EXP';
     }
     final d = t.date!;
     final parts = <String>[
       '${_pad(d.day)}.${_pad(d.month)}.${d.year}',
     ];
     parts.add('+${t.rank.exp} EXP');
-    if (t.done) parts.add('· завершён');
+    if (doneOn) parts.add('· завершён');
     return parts.join(' ');
   }
 
