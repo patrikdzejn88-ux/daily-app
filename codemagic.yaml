@@ -3,13 +3,15 @@ workflows:
     name: Android Release Build
     max_build_duration: 30
     instance_type: mac_mini_m2
+    environment:
+      flutter: stable
     triggers:
       push:
-        branches:
-          - main
-          - master
-    environments:
-      flutter: stable
+        branch_patterns:
+          - pattern: main
+            include: true
+          - pattern: master
+            include: true
     scripts:
       - name: Get dependencies
         script: flutter pub get
@@ -21,7 +23,3 @@ workflows:
         script: flutter build apk --release
     artifacts:
       - build/app/outputs/flutter-apk/app-release.apk
-    publishing:
-      email:
-        recipients:
-          - build@example.com
