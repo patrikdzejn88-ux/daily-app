@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 30
     instance_type: mac_mini_m2
     environment:
-      flutter: stable
+      flutter: 3.47.5
     triggering:
       events:
         - push
@@ -24,6 +24,6 @@ workflows:
       - name: Run tests
         script: flutter test
       - name: Build APK
-        script: flutter build apk --release
+        script: flutter build apk --release --split-per-abi
     artifacts:
-      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/flutter-apk/*.apk

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/task_database.dart';
@@ -16,94 +18,204 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _db = TaskDatabase.instance;
   List<Task> _tasks = [];
   bool _loading = true;
-  final _now = DateTime.now();
+  String? _error;
+  int _totalXp = 0;
+
+  /// Квесты с выполняющейся мутацией: повторный тап игнорируется,
+  /// пока идёт запрос (M5).
+  final Set<int> _pendingIds = {};
+
+  Timer? _midnightTimer;
+
+  static DateTime _dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _scheduleMidnightReload();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _midnightTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Вернулись в приложение — день мог смениться (C2).
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  /// Перезагрузка сразу после ближайшей полуночи (C2).
+  void _scheduleMidnightReload() {
+    _midnightTimer?.cancel();
+    final now = DateTime.now();
+    final midnight = DateTime(now.year, now.month, now.day + 1);
+    _midnightTimer = Timer(
+      midnight.difference(now) + const Duration(seconds: 1),
+      () {
+        _load();
+        _scheduleMidnightReload();
+      },
+    );
   }
 
   Future<void> _load() async {
-    final tasks = await _db.getAll();
-    if (!mounted) return;
+    try {
+      final today = _dayOnly(DateTime.now());
+      // Джоба штрафов System за прошедшие дни (до чтения списка).
+      await _db.applyMissedDayPenalties(today);
+      final tasks = await _db.getAll();
+      final xp = await _db.getTotalXp();
+      if (!mounted) return;
+      setState(() {
+        _tasks = tasks;
+        _totalXp = xp;
+        _loading = false;
+        _error = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Не удалось связаться с System.';
+      });
+    }
+  }
+
+  void _retry() {
     setState(() {
-      _tasks = tasks;
-      _loading = false;
+      _loading = true;
+      _error = null;
     });
+    _load();
   }
 
   Future<void> _addTask() async {
     final task = await showAddTaskDialog(context);
     if (task == null) return;
-    final id = await _db.insert(task);
-    if (!mounted) return;
-    setState(() {
-      _tasks.insert(
-        0,
-        Task.fromMap({...task.toMap(), 'id': id}),
-      );
-    });
-    showSystemMessage(
-      context,
-      message: 'Квест принят: ${task.title}',
-      title: 'SYSTEM',
-      color: SoloColors.neonBlue,
-    );
-  }
-
-  Future<void> _toggle(Task task) async {
-    final nowDone = task.isDoneOn(_now);
-    final updated =
-        nowDone ? task.markNotDone() : task.markDoneOn(_now);
-    await _db.update(updated);
-    if (!mounted) return;
-    setState(() {
-      final i = _tasks.indexWhere((t) => t.id == task.id);
-      if (i != -1) _tasks[i] = updated;
-    });
-    if (!nowDone) {
+    try {
+      final id = await _db.insert(task);
+      if (!mounted) return;
+      setState(() {
+        _tasks.insert(0, Task.fromMap({...task.toMap(), 'id': id}));
+      });
       showSystemMessage(
         context,
-        message: '+${updated.rank.exp} EXP — ${updated.title}',
-        title: 'QUEST CLEAR',
-        color: SoloColors.neonCyan,
-      );
-    } else {
-      showSystemMessage(
-        context,
-        message: 'Квест не выполнен: ${updated.title}',
+        'Квест принят: ${task.title}',
         title: 'SYSTEM',
-        color: SoloColors.textDim,
+        color: SoloColors.neonBlue,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showSystemMessage(
+        context,
+        'Не удалось создать квест',
+        title: 'WARNING',
+        color: SoloColors.danger,
       );
     }
   }
 
-  Future<void> _delete(Task task) async {
-    await _db.delete(task.id!);
-    if (!mounted) return;
+  Future<void> _toggle(Task task) async {
+    final id = task.id;
+    // M5: гонка двойного toggle — повторный тап по той же задаче
+    // игнорируется, пока идёт запрос.
+    if (id == null || _pendingIds.contains(id)) return;
+    final today = _dayOnly(DateTime.now());
+    final wasDone = task.isDoneOn(today);
+    final updated = wasDone ? task.markNotDone() : task.markDoneOn(today);
+
+    _pendingIds.add(id);
+    // Оптимистичное обновление: при ошибке откатываем (в catch ниже).
     setState(() {
-      _tasks.removeWhere((t) => t.id == task.id);
+      final i = _tasks.indexWhere((t) => t.id == id);
+      if (i != -1) _tasks[i] = updated;
     });
-    showSystemMessage(
-      context,
-      message: 'Квест удалён: ${task.title}',
-      title: 'SYSTEM',
-      color: SoloColors.danger,
-    );
+
+    try {
+      await _db.update(updated);
+      // Событийный XP (C1): выполнение → +exp, отмена → удаление события.
+      if (wasDone) {
+        await _db.removeCompletion(updated, today);
+      } else {
+        await _db.recordCompletion(updated, today);
+      }
+      final xp = await _db.getTotalXp();
+      if (!mounted) return;
+      setState(() => _totalXp = xp);
+      if (!wasDone) {
+        showSystemMessage(
+          context,
+          '+${updated.rank.exp} EXP — ${updated.title}',
+          title: 'QUEST CLEAR',
+          color: SoloColors.neonCyan,
+        );
+      } else {
+        showSystemMessage(
+          context,
+          'Квест не выполнен: ${updated.title}',
+          title: 'SYSTEM',
+          color: SoloColors.textDim,
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      // Откат оптимистичного обновления.
+      setState(() {
+        final i = _tasks.indexWhere((t) => t.id == id);
+        if (i != -1) _tasks[i] = task;
+      });
+      showSystemMessage(
+        context,
+        'System недоступна: действие отменено',
+        title: 'WARNING',
+        color: SoloColors.danger,
+      );
+    } finally {
+      _pendingIds.remove(id);
+    }
   }
 
-  List<Task> get _dueTasks =>
-      _tasks.where((t) => t.isDueOn(_now)).toList();
+  Future<void> _delete(Task task) async {
+    try {
+      await _db.delete(task.id!);
+      if (!mounted) return;
+      setState(() {
+        _tasks.removeWhere((t) => t.id == task.id);
+      });
+      showSystemMessage(
+        context,
+        'Квест удалён: ${task.title}',
+        title: 'SYSTEM',
+        color: SoloColors.danger,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showSystemMessage(
+        context,
+        'Не удалось удалить квест',
+        title: 'WARNING',
+        color: SoloColors.danger,
+      );
+    }
+  }
 
-  /// Квесты, назначенные на другие даты (не сегодня), кроме ежедневных.
-  List<Task> get _scheduledTasks {
+  /// Квесты, назначенные на другие даты (не сегодня), кроме ежедневных
+  /// и уже выполненных.
+  List<Task> _scheduledTasks(DateTime today) {
     final list = _tasks
-        .where((t) => !t.daily && t.date != null && !t.isDueOn(_now))
+        .where(
+          (t) => !t.daily && t.date != null && !t.isDueOn(today) && !t.done,
+        )
         .toList();
     list.sort((a, b) => a.date!.compareTo(b.date!));
     return list;
@@ -111,18 +223,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final due = _dueTasks;
-    final active = due.where((t) => !t.isDoneOn(_now));
-    final done = due.where((t) => t.isDoneOn(_now));
-    final scheduled = _scheduledTasks;
-    final totalExp = HunterProgress.expForTasks(_tasks);
+    // Единственный источник «сегодня» на весь экран (C2, C3).
+    final today = _dayOnly(DateTime.now());
+    final due = _tasks.where((t) => t.isDueOn(today)).toList();
+    final active = due.where((t) => !t.isDoneOn(today)).toList();
+    final done = due.where((t) => t.isDoneOn(today)).toList();
+    final scheduled = _scheduledTasks(today);
 
     return Scaffold(
       backgroundColor: SoloColors.background,
       body: SafeArea(
         child: Column(
           children: [
-            _header(totalExp: totalExp),
+            _header(totalExp: _totalXp),
             Expanded(
               child: _loading
                   ? const Center(
@@ -130,9 +243,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: SoloColors.neonBlue,
                       ),
                     )
+                  : _error != null
+                  ? _errorState()
                   : _taskList(
-                      active: active.toList(),
-                      done: done.toList(),
+                      today: today,
+                      active: active,
+                      done: done,
                       scheduled: scheduled,
                     ),
             ),
@@ -167,8 +283,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   border: Border.all(color: SoloColors.neonBlue, width: 1.2),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Icon(Icons.adjust,
-                    color: SoloColors.neonBlue, size: 20),
+                child: const Icon(
+                  Icons.adjust,
+                  color: SoloColors.neonBlue,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 10),
               const Text(
@@ -199,13 +318,75 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _dateLabel() {
     const months = [
-      null, 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+      null,
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
     ];
-    return '${_now.day} ${months[_now.month]}';
+    final now = DateTime.now();
+    return '${now.day} ${months[now.month]}';
+  }
+
+  /// Состояние ошибки загрузки вместо вечного спиннера (B7).
+  Widget _errorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: SoloColors.danger,
+              size: 42,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'SYSTEM НЕДОСТУПНА',
+              style: TextStyle(
+                color: SoloColors.danger,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.4,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _error ?? 'Неизвестная ошибка',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: SoloColors.textDim, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton(
+              onPressed: _retry,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: SoloColors.borderGlow),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Повторить',
+                style: TextStyle(color: SoloColors.neonCyan),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _taskList({
+    required DateTime today,
     required List<Task> active,
     required List<Task> done,
     required List<Task> scheduled,
@@ -230,36 +411,49 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
       children: [
         _sectionLabel(
-            'АКТИВНЫЕ КВЕСТЫ (${active.length})', SoloColors.textSecondary),
+          'АКТИВНЫЕ КВЕСТЫ (${active.length})',
+          SoloColors.textSecondary,
+        ),
         const SizedBox(height: 8),
         if (active.isEmpty)
           _emptyHint('На сегодня нет активных квестов.')
         else
-          ...active.map((t) => TaskTile(
-                task: t,
-                onToggle: _toggle,
-                onDelete: () => _delete(t),
-              )),
+          ...active.map(
+            (t) => TaskTile(
+              task: t,
+              today: today,
+              onToggle: _toggle,
+              onDelete: () => _delete(t),
+            ),
+          ),
         const SizedBox(height: 16),
         if (done.isNotEmpty) ...[
           _sectionLabel('ВЫПОЛНЕНО (${done.length})', SoloColors.done),
           const SizedBox(height: 8),
-          ...done.map((t) => TaskTile(
-                task: t,
-                onToggle: _toggle,
-                onDelete: () => _delete(t),
-              )),
+          ...done.map(
+            (t) => TaskTile(
+              task: t,
+              today: today,
+              onToggle: _toggle,
+              onDelete: () => _delete(t),
+            ),
+          ),
         ],
         const SizedBox(height: 16),
         if (scheduled.isNotEmpty) ...[
-          _sectionLabel('ЗАПЛАНИРОВАНО (${scheduled.length})',
-              SoloColors.neonViolet),
+          _sectionLabel(
+            'ЗАПЛАНИРОВАНО (${scheduled.length})',
+            SoloColors.neonViolet,
+          ),
           const SizedBox(height: 8),
-          ...scheduled.map((t) => TaskTile(
-                task: t,
-                onToggle: _toggle,
-                onDelete: () => _delete(t),
-              )),
+          ...scheduled.map(
+            (t) => TaskTile(
+              task: t,
+              today: today,
+              onToggle: _toggle,
+              onDelete: () => _delete(t),
+            ),
+          ),
         ],
       ],
     );

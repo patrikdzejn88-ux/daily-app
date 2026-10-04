@@ -4,6 +4,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Load signing properties from key.properties (gitignored, never commit real keys).
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) load(f.inputStream())
+}
+
 android {
     namespace = "com.miner.daily_app"
     compileSdk = flutter.compileSdkVersion
@@ -29,11 +35,32 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = (keystoreProperties["storeFile"] as String?)?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+
+            val storeFileProp = keystoreProperties["storeFile"] as String?
+            if (storeFileProp != null && file(storeFileProp).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                // TODO: Provide android/key.properties (storeFile/keyAlias/passwords)
+                // to sign release builds with a real key; falling back to debug keys for now.
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 }

@@ -46,7 +46,11 @@ class Task {
   /// Ежедневный повторяющийся квест.
   final bool daily;
 
-  /// Состояние для одноразовых квестов (и дублирование для совместимости).
+  /// Состояние выполнения одноразового квеста.
+  ///
+  /// Deprecated для ежедневных: там источник истины — [lastDoneDate] и
+  /// события xp_events в БД. Поле оставлено для совместимости со старой
+  /// схемой (m4) и не должно использоваться для daily в новом коде.
   final bool done;
 
   /// День последнего выполнения ежедневного квеста (yyyy-MM-dd).
@@ -114,16 +118,23 @@ class Task {
       id: m['id'] as int?,
       title: m['title'] as String? ?? '',
       rank: rank,
-      date: m['date'] != null ? DateTime.parse(m['date'] as String) : null,
+      date: _parseDate(m['date']),
       daily: (m['daily'] as int? ?? 0) == 1,
       done: (m['done'] as int? ?? 0) == 1,
-      lastDoneDate: m['last_done_date'] != null
-          ? DateTime.parse(m['last_done_date'] as String)
-          : null,
-      createdAt: m['created_at'] != null
-          ? DateTime.parse(m['created_at'] as String)
-          : null,
+      lastDoneDate: _parseDate(m['last_done_date']),
+      createdAt: _parseDate(m['created_at']),
     );
+  }
+
+  /// Безопасный парсинг даты из БД: битая строка → null, а не падение
+  /// всей выборки (m2).
+  static DateTime? _parseDate(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    try {
+      return DateTime.parse(raw);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Квест нужно показать в этот день (сегодня).
@@ -136,13 +147,13 @@ class Task {
   }
 
   Task copyWith({bool? done}) => Task(
-        id: id,
-        title: title,
-        rank: rank,
-        date: date,
-        daily: daily,
-        done: done ?? this.done,
-        lastDoneDate: lastDoneDate,
-        createdAt: createdAt,
-      );
+    id: id,
+    title: title,
+    rank: rank,
+    date: date,
+    daily: daily,
+    done: done ?? this.done,
+    lastDoneDate: lastDoneDate,
+    createdAt: createdAt,
+  );
 }

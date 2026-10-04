@@ -3,6 +3,15 @@ name: Build Android APK
 on:
   push:
     branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -11,14 +20,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.5'
           cache: true
-
-      - name: Enable Flutter web
-        run: flutter config --enable-web
 
       - name: Get dependencies
         run: flutter pub get
@@ -30,10 +43,10 @@ jobs:
         run: flutter test
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --split-per-abi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: daily-quest-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/*.apk

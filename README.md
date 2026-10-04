@@ -26,10 +26,11 @@ flutter run
 ## Структура
 ```
 lib/
-  main.dart              # точка входа, тема
-  models/task.dart       # модель квеста + ранги
-  data/task_database.dart# SQLite хранилище
+  main.dart                 # точка входа, тема
+  models/task.dart          # модель квеста + ранги
+  logic/hunter_progress.dart# чистая логика уровня Hunter (уровни, полоса EXP)
+  data/task_database.dart   # SQLite: квесты + журнал событий опыта (xp_events)
   screens/home_screen.dart
-  theme/solo_colors.dart # палитра Solo Leveling
-  widgets/               # system_message, hunter_level, task_tile, add_task_dialog
+  theme/solo_colors.dart    # палитра Solo Leveling
+  widgets/                  # system_message, hunter_level, task_tile, add_task_dialog
 ```
