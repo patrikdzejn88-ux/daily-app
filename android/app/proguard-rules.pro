@@ -9,3 +9,7 @@
 # sqflite
 -keep class com.tekartik.sqflite.** { *; }
 -dontwarn com.tekartik.sqflite.**
+
+# Play Core (Flutter deferred components) — фикс R8 missing classes
+-keep class com.google.android.play.core.** { *; }
+-dontwarn com.google.android.play.core.**
